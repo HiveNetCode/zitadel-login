@@ -1,0 +1,99 @@
+name: 2. Deploy Docker Image to Remote Machine
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        description: Select the environment
+        default: dev
+        options:
+          - dev
+          - preprod
+          - prod
+
+env:
+  DOCKER_REGISTRY: rbbbucym.gra7.container-registry.ovh.net
+  APP_NAME: hive-login
+
+jobs:
+  deploy:
+    # runs-on: self-hosted
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      # 0. Set APP_NAME and APP_REPOSITORY
+      - name: Set APP_REPOSITORY
+        run: echo "APP_REPOSITORY=hive-login-${{ inputs.environment }}" >> $GITHUB_ENV
+
+      # 1. Start SSH agent and add key
+      - name: Start SSH agent and add key
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      # 1.1 Dedup known hosts (for self-hosted runners)
+      # This step is necessary to avoid the "too many host key entries" error
+      - name: Deduplicate Known Hosts File
+        run: sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+
+      # 2. Login to OVH Registry (Local)
+      - name: Login to OVH Registry
+        run: |
+          echo '${{ secrets.DOCKER_REGISTRY_PASSWORD }}' | docker login ${{ env.DOCKER_REGISTRY }} -u '${{ secrets.DOCKER_REGISTRY_USERNAME }}' --password-stdin
+
+      # 3. Pass Docker Config to Remote Machine
+      - name: Copy Docker Config to Remote
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} "mkdir -p /home/${{ vars.REMOTE_USER }}/.docker"
+          scp -o StrictHostKeyChecking=no ~/.docker/config.json ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }}:/home/${{ vars.REMOTE_USER }}/.docker/config.json
+
+      # Step 4. Set up Docker configuration on the remote machine
+      - name: Set Docker Config on Remote
+        run: |
+          ssh ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} << 'EOF'
+            export DOCKER_CONFIG=/home/${{ vars.REMOTE_USER }}/.docker
+          EOF
+
+      # Step 5. Pull the specified Docker image from the registry to the remote machine
+      - name: Pull Docker Image on Remote
+        run: |
+          ssh ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} << 'EOF'
+            export DOCKER_CONFIG=/home/${{ vars.REMOTE_USER }}/.docker
+            docker pull ${{ env.DOCKER_REGISTRY }}/${{ env.APP_NAME }}/${{ env.APP_REPOSITORY }}:${{ github.event.inputs.environment }}
+          EOF
+
+      # Step 6. Stop the existing Docker container if it is running
+      - name: Stop Existing Container
+        run: |
+          ssh ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} << 'EOF'
+            docker stop hive-login || true
+          EOF
+
+      # Step 7. Remove the existing Docker container to avoid conflicts
+      - name: Remove Existing Container
+        run: |
+          ssh ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} << 'EOF'
+            docker rm hive-login || true
+          EOF
+
+      # Step 8. Run the new Docker container on port 8080
+      - name: Run New Docker Container
+        run: |
+          ssh ${{ vars.REMOTE_USER }}@${{ vars.REMOTE_HOST }} << 'EOF'
+            docker run -d --name hive-login \
+              -p 3000:3000 \
+              -e ZITADEL_API_URL=${{ vars.ZITADEL_API_URL }} \
+              -e ZITADEL_SERVICE_USER_TOKEN=${{ secrets.ZITADEL_SERVICE_USER_TOKEN }} \
+              -e EMAIL_VERIFICATION=true \
+              -e DEBUG=false \
+              ${{ env.DOCKER_REGISTRY }}/${{ env.APP_NAME }}/${{ env.APP_REPOSITORY }}:${{ github.event.inputs.environment }}
+          EOF
+
+      # 9. Logout from OVH Registry
+      - name: Log out of OVH Registry
+        if: always()
+        run: docker logout ${{ env.DOCKER_REGISTRY }}
+
