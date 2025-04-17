@@ -56,6 +56,12 @@ if (process.env.ZITADEL_API_URL) {
     port: "",
     pathname: "/**",
   });
+  imageRemotePatterns.push({
+    protocol: "https",
+    hostname: process.env.ZITADEL_API_URL?.replace("https://", "") || "",
+    port: "443",
+    pathname: "/**",
+  });
 }
 
 const nextConfig = {
@@ -67,6 +73,7 @@ const nextConfig = {
   },
   images: {
     remotePatterns: imageRemotePatterns,
+    domains:[process.env.ZITADEL_API_URL?.replace("https://", "") || ""],
   },
   async headers() {
     return [
