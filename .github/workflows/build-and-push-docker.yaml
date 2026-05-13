@@ -22,7 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set APP_REPOSITORY
-        run: echo "APP_REPOSITORY=hive-login-${{ inputs.environment }}" >> $GITHUB_ENV
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: echo "APP_REPOSITORY=hive-login-$ENVIRONMENT" >> $GITHUB_ENV
 
       - name: Check out code
         uses: actions/checkout@v4
