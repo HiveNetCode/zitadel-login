@@ -34,7 +34,8 @@
   },
   "pnpm": {
     "overrides": {
-      "@typescript-eslint/parser": "^7.9.0"
+      "@typescript-eslint/parser": "^7.9.0",
+      "next@<=15.5.16": "15.5.16"
     }
   },
   "devDependencies": {
